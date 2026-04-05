@@ -6,6 +6,7 @@ import re
 import json
 from urllib.parse import urljoin
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 print("PrivateProperty scraper started")
 
@@ -27,10 +28,10 @@ HEADERS = {
 
 NUM_PAGES = 133
 DELAY_SECONDS = 2
+MAX_THREADS = 10  # Number of concurrent detail page requests
 
 OUTPUT_DIR = Path("data/raw/privateproperty")
 OUTPUT_FILE = OUTPUT_DIR / "privateproperty_listings.csv"
-
 
 # =====================
 # HELPERS
@@ -44,13 +45,36 @@ def get_soup(url: str) -> BeautifulSoup:
 def extract_price(price_div):
     if not price_div:
         return None, None, None
-
     raw = price_div.get_text(" ", strip=True)
     price = raw.replace("per month", "").strip()
     value = re.sub(r"[^\d]", "", price)
-
     return price, value, "ZAR"
 
+
+def scrape_detail_page(url: str) -> dict:
+    """Scrapes individual property detail page for ListingNumber, PropertyType, ListingDate, and ErfSize"""
+    data = {}
+    try:
+        soup = get_soup(url)
+        for li in soup.select("div.property-details li.property-details__list-item"):
+            label_span = li.select_one("span.property-details__name-value")
+            if not label_span:
+                continue
+            label = label_span.contents[0].strip()
+            value_span = li.select_one("span.property-details__value")
+            value = value_span.get_text(strip=True) if value_span else None
+
+            if "Listing number" in label:
+                data["ListingNumber"] = value
+            elif "Property type" in label:
+                data["PropertyType"] = value
+            elif "Listing date" in label:
+                data["ListingDate"] = value
+            elif "Land size" in label:
+                data["ErfSize"] = value
+    except Exception as e:
+        print(f"Failed to scrape detail page {url}: {e}")
+    return data
 
 # =====================
 # SCRAPER
@@ -58,7 +82,6 @@ def extract_price(price_div):
 def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
     listings = []
 
-    # BOTH normal + featured listings
     cards = soup.select("a.listing-result, a.featured-listing")
 
     for card in cards:
@@ -67,10 +90,7 @@ def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
         # -----------------
         # Link + Property_ID
         # -----------------
-        link = urljoin(
-            "https://www.privateproperty.co.za",
-            card.get("href", "")
-        )
+        link = urljoin("https://www.privateproperty.co.za", card.get("href", ""))
         data["Link"] = link
 
         match = re.search(r'/([A-Z]{2}\d+)$', link)
@@ -100,20 +120,14 @@ def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
         # -----------------
         # Title
         # -----------------
-        title_div = (
-            card.select_one("div.listing-result__title") or
-            card.select_one("div.featured-listing__title")
-        )
+        title_div = card.select_one("div.listing-result__title") or card.select_one("div.featured-listing__title")
         if title_div:
             data["Title"] = title_div.get_text(" ", strip=True)
 
         # -----------------
         # Price
         # -----------------
-        price_div = (
-            card.select_one("div.listing-result__price") or
-            card.select_one("div.featured-listing__price")
-        )
+        price_div = card.select_one("div.listing-result__price") or card.select_one("div.featured-listing__price")
         price, value, currency = extract_price(price_div)
         data["Price"] = price
         data["Price_value"] = value
@@ -126,23 +140,17 @@ def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
         if address_span:
             data["Address"] = address_span.get_text(" ", strip=True)
 
-        suburb_span = card.select_one(
-            "span.listing-result__desktop-suburb"
-        )
+        suburb_span = card.select_one("span.listing-result__desktop-suburb")
         if suburb_span:
             data["Location"] = suburb_span.get_text(strip=True)
 
         # -----------------
         # Features
         # -----------------
-        features = card.select(
-            "span.listing-result__feature, span.featured-listing__feature"
-        )
-
+        features = card.select("span.listing-result__feature, span.featured-listing__feature")
         for feature in features:
             title = feature.get("title")
             value = feature.get_text(strip=True)
-
             if title == "Bedrooms":
                 data["Bedrooms"] = value
             elif title == "Bathrooms":
@@ -163,13 +171,11 @@ def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
 
     return listings
 
-
 # =====================
 # MAIN
 # =====================
 def run(save: bool = True) -> pd.DataFrame:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
     all_data = []
 
     for page in range(1, NUM_PAGES + 1):
@@ -183,11 +189,26 @@ def run(save: bool = True) -> pd.DataFrame:
 
         time.sleep(DELAY_SECONDS)
 
+    # -----------------
+    # Concurrent detail page scraping
+    # -----------------
+    print(f"Scraping detail pages with {MAX_THREADS} threads...")
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        future_to_index = {executor.submit(scrape_detail_page, listing["Link"]): i for i, listing in enumerate(all_data)}
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                detail_data = future.result()
+                all_data[idx].update(detail_data)
+            except Exception as e:
+                print(f"Detail page failed for {all_data[idx]['Link']}: {e}")
+
     df = pd.DataFrame(all_data)
     df["ScrapeDate"] = pd.Timestamp.now()
 
     preferred_order = [
         "Property_ID", "Listing_ID",
+        "ListingNumber", "PropertyType", "ListingDate",
         "Title", "Price", "Price_value", "PriceCurrency",
         "Location", "Address",
         "Bedrooms", "Bathrooms", "Parking Spaces", "ErfSize",
@@ -196,17 +217,13 @@ def run(save: bool = True) -> pd.DataFrame:
         "Link", "SourcePage", "ScrapeDate"
     ]
 
-    df = df[
-        [c for c in preferred_order if c in df.columns]
-        + [c for c in df.columns if c not in preferred_order]
-    ]
+    df = df[[c for c in preferred_order if c in df.columns] + [c for c in df.columns if c not in preferred_order]]
 
     if save:
         df.to_csv(OUTPUT_FILE, index=False)
         print(f"Saved {len(df)} records to {OUTPUT_FILE}")
 
     return df
-
 
 # =====================
 # ENTRY POINT
