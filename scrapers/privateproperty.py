@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import time
 import re
+import json
 from urllib.parse import urljoin
 from pathlib import Path
 
@@ -24,7 +25,7 @@ HEADERS = {
     )
 }
 
-NUM_PAGES = 98
+NUM_PAGES = 133
 DELAY_SECONDS = 2
 
 OUTPUT_DIR = Path("data/raw/privateproperty")
@@ -57,28 +58,62 @@ def extract_price(price_div):
 def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
     listings = []
 
-    for card in soup.select("a.listing-result"):
+    # BOTH normal + featured listings
+    cards = soup.select("a.listing-result, a.featured-listing")
+
+    for card in cards:
         data = {"SourcePage": source_url}
 
         # -----------------
-        # Link
+        # Link + Property_ID
         # -----------------
-        data["Link"] = urljoin(
+        link = urljoin(
             "https://www.privateproperty.co.za",
             card.get("href", "")
         )
+        data["Link"] = link
+
+        match = re.search(r'/([A-Z]{2}\d+)$', link)
+        if match:
+            data["Property_ID"] = match.group(1)
+
+        # -----------------
+        # Listing_ID
+        # -----------------
+        wishlist = card.select_one("[data-listing-id]")
+        if wishlist:
+            data["Listing_ID"] = wishlist.get("data-listing-id")
+
+        # -----------------
+        # JSON-LD (Geo)
+        # -----------------
+        json_ld = card.find("script", type="application/ld+json")
+        if json_ld:
+            try:
+                ld = json.loads(json_ld.string)
+                geo = ld.get("geo", {})
+                data["Latitude"] = geo.get("latitude")
+                data["Longitude"] = geo.get("longitude")
+            except:
+                pass
 
         # -----------------
         # Title
         # -----------------
-        title_div = card.select_one("div.listing-result__title")
+        title_div = (
+            card.select_one("div.listing-result__title") or
+            card.select_one("div.featured-listing__title")
+        )
         if title_div:
-            data["Title"] = title_div.contents[0].strip()
+            data["Title"] = title_div.get_text(" ", strip=True)
 
         # -----------------
         # Price
         # -----------------
-        price_div = card.select_one("div.listing-result__price")
+        price_div = (
+            card.select_one("div.listing-result__price") or
+            card.select_one("div.featured-listing__price")
+        )
         price, value, currency = extract_price(price_div)
         data["Price"] = price
         data["Price_value"] = value
@@ -100,7 +135,11 @@ def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
         # -----------------
         # Features
         # -----------------
-        for feature in card.select("span.listing-result__feature"):
+        features = card.select(
+            "span.listing-result__feature, span.featured-listing__feature"
+        )
+
+        for feature in features:
             title = feature.get("title")
             value = feature.get_text(strip=True)
 
@@ -112,6 +151,13 @@ def scrape_listings(soup: BeautifulSoup, source_url: str) -> list[dict]:
                 data["Parking Spaces"] = value
             elif title == "Land size":
                 data["ErfSize"] = value
+
+        # -----------------
+        # Agent
+        # -----------------
+        agent = card.select_one(".featured-listing__agent-name")
+        if agent:
+            data["Agent"] = agent.get_text(strip=True)
 
         listings.append(data)
 
@@ -141,10 +187,13 @@ def run(save: bool = True) -> pd.DataFrame:
     df["ScrapeDate"] = pd.Timestamp.now()
 
     preferred_order = [
+        "Property_ID", "Listing_ID",
         "Title", "Price", "Price_value", "PriceCurrency",
-        "Location", "Address", "Bedrooms", "Bathrooms",
-        "Parking Spaces", "ErfSize", "Link",
-        "SourcePage", "ScrapeDate"
+        "Location", "Address",
+        "Bedrooms", "Bathrooms", "Parking Spaces", "ErfSize",
+        "Latitude", "Longitude",
+        "Agent",
+        "Link", "SourcePage", "ScrapeDate"
     ]
 
     df = df[
