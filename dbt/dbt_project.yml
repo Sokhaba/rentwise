@@ -1,0 +1,27 @@
+name: rentwise
+version: '1.0.0'
+config-version: 2
+
+profile: rentwise
+
+model-paths: ["models"]
+seed-paths:  ["seeds"]
+test-paths:  ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  rentwise:
+    staging:
+      +schema: STAGING
+    intermediate:
+      +schema: INTERMEDIATE
+    mart:
+      +schema: MART
+
+seeds:
+  rentwise:
+    +database: RENTWISE_DB
+    +schema: RAW
+    +quote_columns: false

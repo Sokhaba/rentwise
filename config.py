@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # AWS
     aws_access_key_id:     str
     aws_secret_access_key: str
-    aws_region:            str  = "af-south-1"
+    aws_region:            str  = "us-east-1"
     s3_bucket_name:        str  = "rentwise-raw"
 
     # Snowflake
