@@ -20,8 +20,7 @@ disappearing, and which ones have quietly dropped their asking price.
 ## How it works
 
 The scraper pulls all Cape Town rental listings from Private Property, validates 
-every listing through Pydantic, and uploads a Parquet file to S3. From there a 
-Prefect flow loads it into Snowflake RAW, DBT cleans and transforms it through 
+every listing through Pydantic, and uploads a Parquet file to S3. From there loads it into Snowflake RAW, DBT cleans and transforms it through 
 staging and intermediate layers, and lands it in a MART schema that Power BI 
 reads directly. Each weekly run builds on the last tracking when listings 
 first appeared, whether prices changed, and how long they've been active.
@@ -37,7 +36,7 @@ first appeared, whether prices changed, and how long they've been active.
 | Storage | AWS S3 Parquet, date-partitioned |
 | Warehouse | Snowflake Bronze / Silver / Gold |
 | Transformation | DBT Core |
-| Orchestration | Prefect 3 + GitHub Actions cron |
+| Orchestration | GitHub Actions cron |
 | Dashboards | Power BI / Tableau |
 | CI/CD | GitHub Actions lint · test · dbt compile |
 | Tests | pytest 29 unit tests |
@@ -49,7 +48,7 @@ first appeared, whether prices changed, and how long they've been active.
 ```bash
 pip install -r requirements.txt
 cp .env.example .env
-# fill in AWS, Snowflake, and Prefect credentials
+# fill in AWS, and Snowflake credentials
 ```
 
 Bootstrap Snowflake by running `snowflake/setup.sql` in your worksheet,
