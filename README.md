@@ -1,6 +1,6 @@
 # RentWise
 
-I built this to understand the Cape Town rental market properly — not from 
+I built this to understand the Cape Town rental market properly not from 
 listings I happened to scroll past, but from a full weekly snapshot of what's 
 actually available and at what price. It scrapes Private Property every Sunday, 
 runs through a Bronze/Silver/Gold Snowflake pipeline built with DBT, and lands 
@@ -23,7 +23,7 @@ The scraper pulls all Cape Town rental listings from Private Property, validates
 every listing through Pydantic, and uploads a Parquet file to S3. From there a 
 Prefect flow loads it into Snowflake RAW, DBT cleans and transforms it through 
 staging and intermediate layers, and lands it in a MART schema that Power BI 
-reads directly. Each weekly run builds on the last — tracking when listings 
+reads directly. Each weekly run builds on the last tracking when listings 
 first appeared, whether prices changed, and how long they've been active.
 
 ---
@@ -34,13 +34,13 @@ first appeared, whether prices changed, and how long they've been active.
 |---|---|
 | Scraping | Python · requests · BeautifulSoup |
 | Validation | Pydantic v2 |
-| Storage | AWS S3 — Parquet, date-partitioned |
-| Warehouse | Snowflake — Bronze / Silver / Gold |
+| Storage | AWS S3 Parquet, date-partitioned |
+| Warehouse | Snowflake Bronze / Silver / Gold |
 | Transformation | DBT Core |
 | Orchestration | Prefect 3 + GitHub Actions cron |
 | Dashboards | Power BI / Tableau |
-| CI/CD | GitHub Actions — lint · test · dbt compile |
-| Tests | pytest — 29 unit tests |
+| CI/CD | GitHub Actions lint · test · dbt compile |
+| Tests | pytest 29 unit tests |
 
 ---
 
