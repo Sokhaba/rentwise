@@ -1,34 +1,30 @@
-# Prophet Forecasting for Portfolio Optimisation
+# RentWise
 
-I built this to explore whether time series forecasting could meaningfully 
-improve portfolio allocation decisions. It uses Facebook's Prophet model to 
-forecast next-day asset prices, feeds those forecasts into Markowitz 
-optimisation to calculate optimal portfolio weights, and saves results to 
-Supabase for a live Streamlit dashboard.
+I built this to understand the Cape Town rental market properly — not from 
+listings I happened to scroll past, but from a full weekly snapshot of what's 
+actually available and at what price. It scrapes Private Property every Sunday, 
+runs through a Bronze/Silver/Gold Snowflake pipeline built with DBT, and lands 
+in Power BI dashboards that show price benchmarks, how long listings sit before 
+disappearing, and which ones have quietly dropped their asking price.
 
-> For illustrative purposes only — not financial advice.
-
-**Live:** [portfolio-optimisation.com](http://portfolio-optimisation.com) — 
-runs every morning at 09:00 UTC
-
-**Slides:** [View presentation](#)
+**Live pipeline:** Runs every Sunday 02:00 SAST via GitHub Actions
 
 ---
 
 ## Architecture
 
-<!-- Add architecture diagram here -->
+<!-- Add rentwise_architecture.svg here -->
 
 ---
 
 ## How it works
 
-Prophet fits to historical price data for each asset and generates a 
-one-step-ahead forecast. Those forecasted returns feed into Markowitz 
-optimisation — solving for the portfolio weights that maximise risk-adjusted 
-return given a historical covariance matrix. Results are written to Supabase 
-and surfaced through a Streamlit dashboard where you can inspect weights, 
-compare predicted vs actual prices, and track accuracy over time.
+The scraper pulls all Cape Town rental listings from Private Property, validates 
+every listing through Pydantic, and uploads a Parquet file to S3. From there a 
+Prefect flow loads it into Snowflake RAW, DBT cleans and transforms it through 
+staging and intermediate layers, and lands it in a MART schema that Power BI 
+reads directly. Each weekly run builds on the last — tracking when listings 
+first appeared, whether prices changed, and how long they've been active.
 
 ---
 
@@ -36,29 +32,31 @@ compare predicted vs actual prices, and track accuracy over time.
 
 | Layer | Tool |
 |---|---|
-| Forecasting | Facebook Prophet |
-| Optimisation | SciPy SLSQP solver |
-| Storage | Supabase |
-| Dashboard | Streamlit |
-| Scheduler | CircleCI |
-| Hosting | Hostinger VPS |
-| Dependency management | Poetry |
+| Scraping | Python · requests · BeautifulSoup |
+| Validation | Pydantic v2 |
+| Storage | AWS S3 — Parquet, date-partitioned |
+| Warehouse | Snowflake — Bronze / Silver / Gold |
+| Transformation | DBT Core |
+| Orchestration | Prefect 3 + GitHub Actions cron |
+| Dashboards | Power BI / Tableau |
+| CI/CD | GitHub Actions — lint · test · dbt compile |
+| Tests | pytest — 29 unit tests |
 
 ---
 
 ## Setup
 
 ```bash
-make install-dev
+pip install -r requirements.txt
+cp .env.example .env
+# fill in AWS, Snowflake, and Prefect credentials
 ```
 
-Configure your tickers, risk aversion, and date range in `src/settings.py`, 
-then run:
+Bootstrap Snowflake by running `snowflake/setup.sql` in your worksheet,
+load suburb centroids with `dbt seed`, then run the scraper locally:
 
 ```bash
-make run          # run optimisation
-make dashboard    # launch Streamlit
+python -m scrapers.privateproperty
 ```
 
-Requires a Supabase project and CircleCI account — see 
-[setup guide](#) for environment configuration.
+See the [build guide](#) for full account setup and end-to-end walkthrough.
